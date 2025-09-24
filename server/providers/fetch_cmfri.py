@@ -1,7 +1,7 @@
 # from tools import cmfritool
 
-def display_report(result: dict):
-    pass
+# def display_report(result: dict):
+#     pass
     # print("\n=== Report Summary ===")
     # print("File:", result["file"])
     # print("Pages:", result["pages"])
@@ -31,3 +31,6 @@ def display_report(result: dict):
 #         result = cmfritool.parse_report(pdf_path)
 
 #         display_report(result)
+
+
+

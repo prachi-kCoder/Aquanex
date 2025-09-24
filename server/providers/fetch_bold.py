@@ -38,11 +38,15 @@ def fetch_bold(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
 
     return [{
         "processid": item.get("processid"),
-        "species_name": item.get("species_name"),
-        "lat": item.get("lat"),
-        "lon": item.get("lon"),
-        "marker": item.get("marker"),
-        "genbank_accession": item.get("genbank_accession"),
+        "species_name": (
+            item.get("species_name")
+            or item.get("taxon_identification")
+            or item.get("species")
+        ),
+        "lat": item.get("lat") or item.get("latitude"),
+        "lon": item.get("lon") or item.get("longitude"),
+        "marker": item.get("marker") or item.get("marker_codes"),
+        "genbank_accession": item.get("genbank_accession") or item.get("genbank_id"),
         "timestamp": datetime.datetime.now().isoformat(),
         "source": f"bold/{endpoint}"
     } for item in records]

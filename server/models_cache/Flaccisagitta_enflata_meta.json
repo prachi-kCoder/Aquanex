@@ -1,9 +1,0 @@
-{
-  "status": "ok",
-  "scientific_name": "Flaccisagitta enflata",
-  "model_file": "C:\\Users\\saksh\\OneDrive\\Documents\\Ocean-SIH25\\server\\models_cache\\Flaccisagitta_enflata_rf.pkl",
-  "n_presence": 467,
-  "n_background": 1000,
-  "auc_test": 1.0,
-  "trained_at": "2025-09-10T10:38:42.655932Z"
-}

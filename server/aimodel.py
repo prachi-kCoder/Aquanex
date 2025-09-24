@@ -50,9 +50,6 @@ from sklearn.preprocessing import StandardScaler
 # Image rendering
 from PIL import Image, ImageDraw
 
-# -------------------------
-# Config / Paths
-# -------------------------
 INDOBIS_NODE_UUID = "1a3b0f1a-4474-4d73-9ee1-d28f92a83996"
 
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
@@ -64,9 +61,6 @@ os.makedirs(MODELS_DIR, exist_ok=True)
 os.makedirs(DATA_CACHE, exist_ok=True)
 os.makedirs(STATIC_DIR, exist_ok=True)
 
-# -------------------------
-# FastAPI app
-# -------------------------
 app = FastAPI(title="IndOBIS SDM (Multi-species, Lightweight)")
 
 # CORS for your dashboard/frontend
@@ -81,14 +75,7 @@ app.add_middleware(
 # Static files for PNG heatmaps
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
-# -------------------------
-# Pydantic Schemas
-# -------------------------
 
-
-# -------------------------
-# OBIS fetch (via pyobis)
-# -------------------------
 def fetch_occurrences_indobis(scientific_name: str, max_records: int = 5000, cache=True) -> pd.DataFrame:
     """
     Fetch IndOBIS occurrences for a species and cache as CSV (to keep deps light).
@@ -102,7 +89,12 @@ def fetch_occurrences_indobis(scientific_name: str, max_records: int = 5000, cac
     except Exception as e:
         raise HTTPException(status_code=500, detail="pyobis is required. pip install pyobis")
 
-    resp = occurrences.search(scientificname=scientific_name, nodeid=INDOBIS_NODE_UUID, size=max_records).execute()
+    resp = occurrences.search(
+        scientificname=scientific_name,
+        # nodeid=INDOBIS_NODE_UUID,   # <-- This restricts to India
+        size=max_records
+    ).execute()
+
 
     # pyobis may return dict with "results", list, or DF-like
     if isinstance(resp, dict) and "results" in resp:
@@ -192,12 +184,222 @@ def features_from_df(df: pd.DataFrame) -> pd.DataFrame:
     X["year"] = df["eventDate_parsed"].apply(lambda d: d.year if (pd.notna(d)) else 2000).astype(int)
     X["month"] = df["eventDate_parsed"].apply(lambda d: d.month if (pd.notna(d)) else 1).astype(int)
     return X
+import re
+import logging
+import tempfile
+
+logger = logging.getLogger(__name__)
+if not logger.handlers:
+    # let Uvicorn handle top-level logging, but ensure at least basic config if run standalone
+    logging.basicConfig(level=logging.INFO)
+
+def _safe_name(scientific_name: str) -> str:
+    """Canonical filename-safe prefix: lower, trimmed, spaces -> underscore, drop odd chars."""
+    s = scientific_name.strip().lower()
+    s = re.sub(r"\s+", "_", s)
+    s = re.sub(r"[^a-z0-9_]", "", s)
+    return s or "species"
+
+# def train_single_species(scientific_name: str, max_records: int, test_size: float, random_state: int) -> Dict[str, Any]:
+#     """
+#     Train a single species model. Writes model and meta files atomically.
+#     Always writes a meta file (status: ok | skipped | error) so the UI can show attempts.
+#     """
+#     safe_name = _safe_name(scientific_name)
+#     logger.info(f"[TRAIN] Starting training for '{scientific_name}' -> file prefix '{safe_name}'")
+#     try:
+#         df = fetch_occurrences_indobis(scientific_name, max_records=max_records, cache=True)
+#     except Exception as e:
+#         logger.exception(f"[TRAIN] Fetch error for {scientific_name}: {e}")
+#         meta = {
+#             "scientific_name": scientific_name,
+#             "status": "error",
+#             "detail": f"fetch_error: {str(e)}",
+#             "trained_at": datetime.utcnow().isoformat() + "Z"
+#         }
+#         # write meta atomically
+#         metaf = os.path.join(MODELS_DIR, f"{safe_name}_meta.json")
+#         tmp_meta = metaf + ".tmp"
+#         try:
+#             with open(tmp_meta, "w") as fh:
+#                 json.dump(meta, fh, indent=2)
+#                 fh.flush(); os.fsync(fh.fileno())
+#             os.replace(tmp_meta, metaf)
+#         except Exception:
+#             logger.exception("[TRAIN] Failed to write error meta file.")
+#         return meta
+
+#     # If fetch returned None or empty DataFrame
+#     if df is None:
+#         logger.warning(f"[TRAIN] fetch returned None for {scientific_name}")
+#         meta = {
+#             "scientific_name": scientific_name,
+#             "status": "no_data",
+#             "detail": "fetch returned None",
+#             "trained_at": datetime.utcnow().isoformat() + "Z"
+#         }
+#         metaf = os.path.join(MODELS_DIR, f"{safe_name}_meta.json")
+#         tmp_meta = metaf + ".tmp"
+#         with open(tmp_meta, "w") as fh:
+#             json.dump(meta, fh, indent=2); fh.flush(); os.fsync(fh.fileno())
+#         os.replace(tmp_meta, metaf)
+#         return meta
+
+#     # Show count early for debugging
+#     try:
+#         logger.info(f"[TRAIN] {scientific_name} fetched rows: {len(df)} (type={type(df)})")
+#     except Exception:
+#         logger.info(f"[TRAIN] {scientific_name} fetched (len unknown)")
+
+#     # Basic QC
+#     try:
+#         df = df[(df["lat"].between(-90, 90)) & (df["lon"].between(-180, 180))]
+#         df = df.dropna(subset=["lat", "lon"])
+#     except Exception as e:
+#         logger.exception(f"[TRAIN] QC filtering failed for {scientific_name}: {e}")
+#         meta = {
+#             "scientific_name": scientific_name,
+#             "status": "error",
+#             "detail": f"qc_error: {str(e)}",
+#             "trained_at": datetime.utcnow().isoformat() + "Z"
+#         }
+#         metaf = os.path.join(MODELS_DIR, f"{safe_name}_meta.json")
+#         tmp_meta = metaf + ".tmp"
+#         with open(tmp_meta, "w") as fh:
+#             json.dump(meta, fh, indent=2); fh.flush(); os.fsync(fh.fileno())
+#         os.replace(tmp_meta, metaf)
+#         return meta
+
+#     logger.info(f"[TRAIN] After filtering: {len(df)} rows for {scientific_name}")
+#     if len(df) < 30:
+#         logger.warning(f"[TRAIN] Skipping {scientific_name}: insufficient records ({len(df)})")
+#         meta = {
+#             "scientific_name": scientific_name,
+#             "status": "skipped",
+#             "reason": f"Not enough presence records ({len(df)}).",
+#             "trained_at": datetime.utcnow().isoformat() + "Z"
+#         }
+#         metaf = os.path.join(MODELS_DIR, f"{safe_name}_meta.json")
+#         tmp_meta = metaf + ".tmp"
+#         with open(tmp_meta, "w") as fh:
+#             json.dump(meta, fh, indent=2); fh.flush(); os.fsync(fh.fileno())
+#         os.replace(tmp_meta, metaf)
+#         return meta
+
+#     # Build training set
+#     try:
+#         pres = df[["lat", "lon", "depth_m", "eventDate_parsed"]].copy()
+#         pres["presence"] = 1
+#         n_bg = max(len(pres) * 2, 1000)
+#         bg = make_background(pres, n_background=n_bg, seed=random_state)
+#         bg["presence"] = 0
+#         full = pd.concat([pres, bg], ignore_index=True).sample(frac=1.0, random_state=random_state)
+#         X = features_from_df(full)
+#         y = full["presence"].values
+#         Xtr, Xte, ytr, yte = train_test_split(X, y, test_size=test_size, random_state=random_state, stratify=y)
+#     except Exception as e:
+#         logger.exception(f"[TRAIN] Dataset preparation failed for {scientific_name}: {e}")
+#         meta = {
+#             "scientific_name": scientific_name,
+#             "status": "error",
+#             "detail": f"prep_error: {str(e)}",
+#             "trained_at": datetime.utcnow().isoformat() + "Z"
+#         }
+#         metaf = os.path.join(MODELS_DIR, f"{safe_name}_meta.json")
+#         tmp_meta = metaf + ".tmp"
+#         with open(tmp_meta, "w") as fh:
+#             json.dump(meta, fh, indent=2); fh.flush(); os.fsync(fh.fileno())
+#         os.replace(tmp_meta, metaf)
+#         return meta
+
+#     # Train
+#     try:
+#         pipe = Pipeline([
+#             ("scaler", StandardScaler()),
+#             ("rf", RandomForestClassifier(n_estimators=200, random_state=random_state, n_jobs=-1))
+#         ])
+#         pipe.fit(Xtr, ytr)
+#         yprob = pipe.predict_proba(Xte)[:, 1]
+#         try:
+#             auc = float(roc_auc_score(yte, yprob))
+#         except Exception:
+#             auc = None
+#     except Exception as e:
+#         logger.exception(f"[TRAIN] Model training failed for {scientific_name}: {e}")
+#         meta = {
+#             "scientific_name": scientific_name,
+#             "status": "error",
+#             "detail": f"train_error: {str(e)}",
+#             "trained_at": datetime.utcnow().isoformat() + "Z"
+#         }
+#         metaf = os.path.join(MODELS_DIR, f"{safe_name}_meta.json")
+#         tmp_meta = metaf + ".tmp"
+#         with open(tmp_meta, "w") as fh:
+#             json.dump(meta, fh, indent=2); fh.flush(); os.fsync(fh.fileno())
+#         os.replace(tmp_meta, metaf)
+#         return meta
+
+#     # Save model & meta atomically
+#     model_file = os.path.join(MODELS_DIR, f"{safe_name}_rf.pkl")
+#     meta = {
+#         "status": "ok",
+#         "scientific_name": scientific_name,
+#         "model_file": model_file,
+#         "n_presence": int(len(pres)),
+#         "n_background": int(len(bg)),
+#         "auc_test": auc,
+#         "trained_at": datetime.utcnow().isoformat() + "Z"
+#     }
+#     metaf = os.path.join(MODELS_DIR, f"{safe_name}_meta.json")
+
+#     try:
+#         tmp_model = model_file + ".tmp"
+#         joblib.dump(pipe, tmp_model)
+#         os.replace(tmp_model, model_file)
+#     except Exception:
+#         logger.exception(f"[TRAIN] Failed to write model file for {scientific_name}")
+#         meta["status"] = "error"
+#         meta["detail"] = "failed_writing_model"
+#         # still write meta with error
+#         tmp_meta = metaf + ".tmp"
+#         with open(tmp_meta, "w") as fh:
+#             json.dump(meta, fh, indent=2); fh.flush(); os.fsync(fh.fileno())
+#         os.replace(tmp_meta, metaf)
+#         return meta
+
+#     try:
+#         tmp_meta = metaf + ".tmp"
+#         with open(tmp_meta, "w") as f:
+#             json.dump(meta, f, indent=2); f.flush(); os.fsync(f.fileno())
+#         os.replace(tmp_meta, metaf)
+#     except Exception:
+#         logger.exception(f"[TRAIN] Failed to write meta file for {scientific_name}")
+#         # Leave model file in place, but mark meta write failure
+#         meta["status"] = "error"
+#         meta["detail"] = "failed_writing_meta"
+#         # try once to write a meta fallback
+#         try:
+#             with open(metaf, "w") as f:
+#                 json.dump(meta, f, indent=2); f.flush(); os.fsync(f.fileno())
+#         except Exception:
+#             logger.exception("[TRAIN] Final attempt to write meta failed.")
+
+#     logger.info(f"[TRAIN] Completed for {scientific_name}: status={meta.get('status')}")
+#     return meta
 
 def train_single_species(scientific_name: str, max_records: int, test_size: float, random_state: int) -> Dict[str, Any]:
+    print("[DEBUG] Fetching occurrences...")
     df = fetch_occurrences_indobis(scientific_name, max_records=max_records, cache=True)
+    if df is None or df.empty:
+        print("[DEBUG] No data fetched.")
+    else :
+        print("[DEBUG] Done fetching, got:", type(df), len(df) if df is not None else "None")
     # Basic QC
     df = df[(df["lat"].between(-90, 90)) & (df["lon"].between(-180, 180))]
     df = df.dropna(subset=["lat", "lon"])
+    print("--------------------------------------------------------")
+    print("--------------------------------------------------------")
+    print(f"[DEBUG] {scientific_name}: {len(df)} records after filtering")
     if len(df) < 30:
         return {"scientific_name": scientific_name, "status": "skipped", "reason": f"Not enough presence records ({len(df)})."}
 
@@ -241,6 +443,8 @@ def train_single_species(scientific_name: str, max_records: int, test_size: floa
         f.flush()
         os.fsync(f.fileno())
     return meta
+
+
 
 def load_model_meta(scientific_name: str):
     mfile = os.path.join(MODELS_DIR, f"{scientific_name.replace(' ', '_')}_rf.pkl")
