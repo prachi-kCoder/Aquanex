@@ -19,6 +19,7 @@ import {
   Legend,
   CartesianGrid
 } from 'recharts'
+import InsightsUI from '../../InsightsUI'
 
 const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#845EC2', '#D65DB1', '#FF6F91']
 
@@ -185,6 +186,12 @@ export default function Dashboard() {
           <div className="card-body">
             <h2 className="card-title">Ingest Providers</h2>
             <IndobisDashboard />
+          </div>
+        </div>
+        <div className="card">
+          <div className="card-body">
+            <h2 className="card-title">Ingest Providers</h2>
+            <InsightsUI />
           </div>
         </div>
       </div>

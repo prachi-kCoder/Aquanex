@@ -46,6 +46,36 @@ async function getNOAARecord({ station, product, begin_date, end_date }) {
 
   return await res.json();
 }
+async function getNOAARecords(station, products, begin_date, end_date) {
+  const calls = products.map(product =>
+    getNOAARecord({ station, product, begin_date, end_date })
+  );
+  const results = await Promise.all(calls);
+  return results.flat(); // flatten array of arrays
+}
+export async function ingestNOAA(station, product, begin_date, end_date) {
+  const res = await fetch(`${API_URL}/ingest/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      provider: "noaa",
+      payload: {
+        station,
+        product,
+        begin_date,
+        end_date,
+      },
+    }),
+  });
+
+  if (!res.ok) {
+    const err = await res.json();
+    throw new Error(err.detail || "NOAA ingestion failed");
+  }
+
+  const data = await res.json();
+  return data.records || [];
+}
 // 🔹 WoRMS: dedicated function
 async function ingestWorms({ scientificname, AphiaID }) {
   if (!scientificname && !AphiaID) {
@@ -71,7 +101,7 @@ async function ingestObis({ scientificname, size = 20 }) {
   return await ingest("obis", payload);
 }
 
-export async function ingestOpenMeteo(payload) {
+ async function ingestOpenMeteo(payload) {
   const reqPayload = {
     ...payload,
     limit_hours: payload.limit_hours || 6, // default 48 hours
@@ -86,6 +116,6 @@ export async function ingestOpenMeteo(payload) {
   return res.json();
 }
 
-export default { getData, ingest, getNOAARecord , ingestWorms, ingestObis };
+export default { getData, ingest, ingestOpenMeteo ,ingestNOAA, getNOAARecord ,getNOAARecords, ingestWorms, ingestObis };
 
 

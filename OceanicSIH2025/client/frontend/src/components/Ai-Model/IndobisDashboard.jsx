@@ -98,10 +98,6 @@ export default function IndobisDashboard() {
     }
     }
 
-
-//   useEffect(() => {
-//     fetchStatus();
-//   }, []);
     useEffect(() => {
     fetch("http://localhost:8000/list_models") // replace with your backend URL
         .then((res) => res.json())
